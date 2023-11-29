@@ -128,6 +128,8 @@ type goConfig struct {
 
 	// testMode determines how go_test targets are generated.
 	testMode testMode
+	// testTags contains tags to generate separate test targets for, if the test mode is `build_tag`
+	testTags map[string]struct{}
 
 	// buildDirectives, buildExternalAttr, buildExtraArgsAttr,
 	// buildFileGenerationAttr, buildFileNamesAttr, buildFileProtoModeAttr and
@@ -145,6 +147,9 @@ const (
 
 	// fileTestMode generates a go_test for each Go test file.
 	fileTestMode
+
+	// buildTagTestMode generates a go_test for each set of build tags.
+	buildTagTestMode
 )
 
 var (
@@ -158,19 +163,34 @@ func (m testMode) String() string {
 		return "default"
 	case fileTestMode:
 		return "file"
+	case buildTagTestMode:
+		return "build_tag"
 	default:
 		return "unknown"
 	}
 }
 
-func testModeFromString(s string) (testMode, error) {
-	switch s {
+func testModeFromString(s string) (testMode, map[string]struct{}, error) {
+	split := strings.SplitN(s, " ", 2)
+	mode := ""
+	if len(split) > 0 {
+		mode = split[0]
+	}
+	switch mode {
 	case "default":
-		return defaultTestMode, nil
+		return defaultTestMode, nil, nil
 	case "file":
-		return fileTestMode, nil
+		return fileTestMode, nil, nil
+	case "build_tag":
+		testTags := make(map[string]struct{})
+		if len(split) == 2 {
+			for _, t := range splitValue(split[1]) {
+				testTags[t] = struct{}{}
+			}
+		}
+		return buildTagTestMode, testTags, nil
 	default:
-		return 0, fmt.Errorf("unrecognized go_test mode: %q", s)
+		return 0, nil, fmt.Errorf("unrecognized go_test mode: %q", s)
 	}
 }
 
@@ -630,12 +650,13 @@ Update io_bazel_rules_go to a newer version in your WORKSPACE file.`
 				}
 
 			case "go_test":
-				mode, err := testModeFromString(d.Value)
+				mode, tags, err := testModeFromString(d.Value)
 				if err != nil {
 					log.Print(err)
 					continue
 				}
 				gc.testMode = mode
+				gc.testTags = tags
 
 			case "go_visibility":
 				gc.goVisibility = append(gc.goVisibility, strings.TrimSpace(d.Value))

@@ -520,33 +520,44 @@ func (g *generator) generateTests(pkg *goPackage, library string) []*rule.Rule {
 	gc := getGoConfig(g.c)
 	tests := pkg.tests
 	if len(tests) == 0 && gc.testMode == defaultTestMode {
-		tests = []goTarget{goTarget{}}
+		tests = map[string]*goTarget{"": {}}
 	}
-	var name func(goTarget) string
+	var name func(bool, string) string
 	switch gc.testMode {
 	case defaultTestMode:
-		name = func(goTarget) string {
+		name = func(bool, string) string {
 			return testNameByConvention(gc.goNamingConvention, pkg.importPath)
 		}
 	case fileTestMode:
-		name = func(test goTarget) string {
-			if test.sources.hasGo() {
-				if srcs := test.sources.buildFlat(); len(srcs) == 1 {
-					return testNameFromSingleSource(srcs[0])
-				}
+		name = func(hasGo bool, name string) string {
+			if !hasGo || name == "" {
+				return testNameByConvention(gc.goNamingConvention, pkg.importPath)
 			}
-			return testNameByConvention(gc.goNamingConvention, pkg.importPath)
+			return testNameFromSingleSource(name)
+		}
+	case buildTagTestMode:
+		name = func(hasGo bool, name string) string {
+			if !hasGo || name == "" {
+				return testNameByConvention(gc.goNamingConvention, pkg.importPath)
+			}
+			return "go_" + name + "_test"
 		}
 	}
 	var res []*rule.Rule
-	for i, test := range tests {
-		goTest := rule.NewRule("go_test", name(test))
+	var testNames []string
+	for tn := range tests {
+		testNames = append(testNames, tn)
+	}
+	sort.Strings(testNames)
+	for _, testName := range testNames {
+		test := *tests[testName]
 		hasGo := test.sources.hasGo()
-		if hasGo || i == 0 {
+		goTest := rule.NewRule("go_test", name(hasGo, testName))
+		if hasGo || len(res) == 0 {
 			res = append(res, goTest)
-			if !hasGo {
-				continue
-			}
+		}
+		if !hasGo {
+			continue
 		}
 		var embed string
 		if test.hasInternalTest {

@@ -32,13 +32,13 @@ import (
 // goPackage contains metadata for a set of .go and .proto files that can be
 // used to generate Go rules.
 type goPackage struct {
-	name, dir, rel        string
-	library, binary, test goTarget
-	tests                 []goTarget
-	proto                 protoTarget
-	hasTestdata           bool
-	hasMainFunction       bool
-	importPath            string
+	name, dir, rel  string
+	library, binary goTarget
+	tests           map[string]*goTarget
+	proto           protoTarget
+	hasTestdata     bool
+	hasMainFunction bool
+	importPath      string
 }
 
 // goTarget contains information used to generate an individual Go rule
@@ -109,13 +109,40 @@ func (pkg *goPackage) addFile(c *config.Config, er *embedResolver, info fileInfo
 		if info.isCgo {
 			return fmt.Errorf("%s: use of cgo in test not supported", info.path)
 		}
-		if getGoConfig(c).testMode == fileTestMode || len(pkg.tests) == 0 {
-			pkg.tests = append(pkg.tests, goTarget{})
+
+		if len(pkg.tests) == 0 {
+			pkg.tests = map[string]*goTarget{"": {}}
 		}
-		// Add the the file to the most recently added test target (in fileTestMode)
-		// or the only test target (in defaultMode).
-		// In both cases, this will be the last element in the slice.
-		test := &pkg.tests[len(pkg.tests)-1]
+		test := pkg.tests[""]
+
+		if mode := getGoConfig(c).testMode; mode == fileTestMode {
+			if _, ok := pkg.tests[info.name]; ok {
+				return fmt.Errorf("duplicate file name %q in package %q", info.name, pkg.name)
+			}
+			test = &goTarget{}
+			pkg.tests[info.name] = test
+		} else if mode == buildTagTestMode {
+			var tagsList []string
+			testTags := getGoConfig(c).testTags
+			if len(testTags) == 0 {
+				// no tags specified in the directive: split all tags
+				tagsList = info.tags.tags()
+			} else {
+				for _, t := range info.tags.tags() {
+					if _, ok := testTags[t]; ok {
+						tagsList = append(tagsList, t)
+					}
+				}
+			}
+			tagsKey := strings.Join(tagsList, ",")
+			if t, ok := pkg.tests[tagsKey]; ok {
+				test = t
+			} else {
+				test = &goTarget{}
+				pkg.tests[tagsKey] = test
+			}
+		}
+
 		test.addFile(c, er, info)
 		if !info.isExternalTest {
 			test.hasInternalTest = true
